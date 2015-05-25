@@ -35,7 +35,6 @@ namespace ExpertSystem
                     cat = null;
                     DBWorker dbWorker = new DBWorker(createNewDBDialog.FileName);
                     dbWorker.formStructureKB();
-
                 }
                 catch (Exception ex)
                 {
@@ -58,8 +57,6 @@ namespace ExpertSystem
                 formEdit.Show();
             }
             openFileDialog = null;
-
         }
-
     }
 }

@@ -7,13 +7,30 @@ using System.Linq;
 using System.Text;
 using System.Windows.Forms;
 using System.Threading;
+using System.IO;
 
 namespace ExpertSystem
 {
     public partial class ES_form : Form
     {
+
         private DBWorker dbWorker;
-        private DataTable dtRule;
+        private Thread workThread;
+        private int tickPerRule = 1000;
+        private bool showInfoWindows = true;
+
+        private delegate void delegateAddStringInLbResult(string text);
+        private void addStringInLbResult(string str)
+        {
+            this.lb_result.Items.Add(str);
+        }
+
+        private delegate void delegateThisRefresh();
+        private void thisRefresh() 
+        { 
+            this.Refresh(); 
+        }
+
         public ES_form(DBWorker dbW)
         {
             InitializeComponent();
@@ -21,7 +38,7 @@ namespace ExpertSystem
             #region получение таблицы правил и отражение на dgv
                 this.dbWorker = dbW;
                 DataSet dSet = dbWorker.getDataSet();
-                dtRule = dSet.Tables[0];
+                DataTable dtRule = dSet.Tables[0];
                 dgv_rule.DataSource = dtRule;
                 int ruleCount = dgv_rule.RowCount -1;            
             
@@ -45,7 +62,7 @@ namespace ExpertSystem
                 {
                     for (int j = 1; j < dgv_rule.ColumnCount; j++)
                     {
-                        string ruleAntVal = deleteSpaces(dgv_rule[j,i].Value.ToString());
+                        string ruleAntVal = deleteSpacesInString(dgv_rule[j,i].Value.ToString());
                         dgv_rule[j,i].Value = ruleAntVal;
                     }
 
@@ -68,7 +85,7 @@ namespace ExpertSystem
 
                 dtFact.Columns.AddRange(new DataColumn[] { idFactCol, factVarCol, factValCol });
                 dgv_fact.DataSource = dtFact;
-               dgv_fact.ColumnHeadersVisible = false;
+                dgv_fact.ColumnHeadersVisible = false;
 
 
 
@@ -83,19 +100,21 @@ namespace ExpertSystem
 
 
 
-              // DataRow dRow = dtFact.NewRow();
-               //dRow["fact_var"] = "двигатель"; dRow["fact_val"] = "не заводится";
-               //dtFact.Rows.Add(dRow);
+                DataRow dRow = dtFact.NewRow();
+                dRow["fact_var"] = "двигатель"; dRow["fact_val"] = "не заводится";
+                dtFact.Rows.Add(dRow);
 
-               //dRow = dtFact.NewRow();
-               //dRow["fact_var"] = "искра"; dRow["fact_val"] = "отсутствует";
-               //dtFact.Rows.Add(dRow);
+                dRow = dtFact.NewRow();
+                dRow["fact_var"] = "искра"; dRow["fact_val"] = "отсутствует";
+                dtFact.Rows.Add(dRow);
 
                 dgv_fact.Columns[0].Visible = false;
                 #endregion
         }
+
         enum continueAnswer { yes,no,na}
-        enum entering { was,wasnot}
+        enum entering { was, wasnot}
+
         private void btn_getFact_Click(object sender, EventArgs e)
         {
             //int dgv_fact_count = dgv_fact.RowCount - 1;
@@ -110,6 +129,9 @@ namespace ExpertSystem
 
         private void btn_begin_Click(object sender, EventArgs e)
         {
+            btn_stop.Enabled = true;
+            btn_begin.Enabled = false;
+            lb_result.Items.Clear();
 
             #region создаем таблицу переменных условий и связываем с dgv
 
@@ -136,8 +158,10 @@ namespace ExpertSystem
                 dgv_varCon.Columns[1].HeaderText = "Идентификатор переменной";
                 dgv_varCon.Columns[2].HeaderText = "Отметка инициализации";
                 dgv_varCon.Columns[3].HeaderText = "Значение переменной";
-            #endregion
+
+            #endregion 
             #region создание таблицы очереди фактов
+
                 DataTable dtQueue = new DataTable("queue");
 
                 DataColumn colIdQFact = new DataColumn("id_q_fact", typeof(int));
@@ -158,6 +182,7 @@ namespace ExpertSystem
                 dgv_queue.Columns[0].Visible = false;
                 dgv_queue.Columns[1].HeaderText = "Название факта";
                 dgv_queue.Columns[2].HeaderText = "Значение факта";
+
             #endregion
             #region заполнение столбца идентификаторов таблицы переменных условий
                 int ruleCount = dgv_rule.RowCount;
@@ -186,7 +211,7 @@ namespace ExpertSystem
                 setInd.Clear(); setInd = null;
             #endregion
             #region первичная инициализация таблицы переменных условия и формирование очереди
-                for (int curFact = 0; curFact < dgv_fact.Rows.Count - 1; curFact++)
+                for (int curFact = 0; curFact < dgv_fact.Rows.Count-1 ; curFact++)
                 {
                     string identFact = dgv_fact["fact_var", curFact].Value.ToString();
                     string valFact = dgv_fact["fact_val", curFact].Value.ToString();
@@ -209,211 +234,352 @@ namespace ExpertSystem
            #endregion
 
 
-           #region работа основная
 
-                continueAnswer continueAns = continueAnswer.na;
-                bool firstStep = true;
-                string q_fact_var = "";
-                string q_fact_val = "";
 
-                do
-                {
-                        //берем факт из очереди
-                    if (firstStep == false) { MessageBox.Show("Закончили работать с фактом из очереди (" + q_fact_var + " - " + q_fact_val + ")"); }
-                    firstStep = false;
-                    ///////////////////////////////////
-                    for (int i = 0; i < dgv_rule.Rows.Count; i++)
-                        dgv_rule.Rows[i].DefaultCellStyle.BackColor = Color.White;
-                    //////////////////////
-                    q_fact_var = dtQueue.Rows[0]["q_fact_var"].ToString();
-                    q_fact_val = dtQueue.Rows[0]["q_fact_val"].ToString();
-                    MessageBox.Show("Берем новый факт из очереди (" + q_fact_var + " - " + q_fact_val +")");
-                    lb_result.Items.Add("Работаем с фактом (" + q_fact_var + " - " + q_fact_val+ ")");
-                    entering ent = entering.wasnot;
-                    //ищем вхождение в правило
-                    for (int curRule = 0; curRule < dgv_rule.RowCount; curRule++)
+
+                Dictionary<String, DataTable> dicParametr = new Dictionary<string, DataTable>(3);
+                #region чистим dtQueue
+                    for (int i = 0; i < dgv_queue.RowCount; i++)
                     {
-                        dgv_rule.Rows[curRule].DefaultCellStyle.BackColor = Color.Gray;
-
-                        string[] ruleAnt = new string[8];
-                        for (int curCell = 1; curCell < 9; curCell++)
+                        for (int j = 1; j < dgv_queue.ColumnCount; j++)
                         {
-                            ruleAnt[curCell-1] = dgv_rule[curCell, curRule].Value.ToString();
+                            string ruleAntVal = deleteSpacesInString(dgv_queue[j, i].Value.ToString());
+                            dgv_queue[j, i].Value = ruleAntVal;
                         }
-                        //пробегаем по текущему правилу
-                        for (int curAnt = 0; curAnt <= 4; curAnt += 2)
+
+                    }
+                
+                    dicParametr.Add("dtQueue", dtQueue);
+                #endregion
+                #region чистим dtVarCon
+
+                    for (int i = 0; i < dgv_queue.RowCount; i++)
+                    {
+                        for (int j = 1; j < 3; j+=2)
                         {
-                            //если есть вхождение в правило
-                            if (ruleAnt[curAnt].Equals(q_fact_var, StringComparison.OrdinalIgnoreCase))
+                            string curCellValue = deleteSpacesInString(dgv_varCon[j, i].Value.ToString());
+                            dgv_varCon[j, i].Value = curCellValue;
+                        }
+
+                    }
+
+                    dicParametr.Add("dtVarCon", dtVarCon);
+                #endregion
+                #region чистим dtRule
+                        DataTable dtRule = dbWorker.getDataSet().Tables[0];
+                        dgv_rule.DataSource = dtRule;
+
+                        for (int i = 0; i < dgv_rule.RowCount; i++)
+                        {
+                            for (int j = 1; j < dgv_rule.ColumnCount; j++)
                             {
-                                //и вхождение с совпало с фактом
-                                if (ruleAnt[curAnt + 1].Equals(q_fact_val, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    ent = entering.was;
-                                    bool allTrue = true;
-                                    dgv_rule.Rows[curRule].DefaultCellStyle.BackColor = Color.LightYellow;
-                                    //проверяем всё правило на факты
-                                    for (int curAntInRule = 0; curAntInRule <= 4 ; curAntInRule += 2)
-                                    {
-                                        if (ruleAnt[curAntInRule] == "") break;
-                                        DataRow[] foundRows = dtQueue.Select("q_fact_var = " + "'" + ruleAnt[curAntInRule] + "'");//ищем в очереди
-                                        if (foundRows.Length != 0)//нашли в очереди
-                                        {
-                                            string curValQ = foundRows[0]["q_fact_val"].ToString();
-                                            string curVal = ruleAnt[curAntInRule + 1];
-                                            allTrue &= curValQ.Equals(curVal, StringComparison.OrdinalIgnoreCase);
-                                        }
-                                        else
-                                        { //нет в очереди-проверим переменные
-                                            ///////////////////////////////////////////////////////////////////
-                                            DataRow[] foundRowsV = dtVarCon.Select("ident_var = " + "'" + ruleAnt[curAntInRule] + "'");
-                                            if (foundRowsV.Length == 0)
-                                            { allTrue = false; break; }
-                                            else
-                                            {
-                                                string curValV = foundRowsV[0]["val_var"].ToString();
-                                                string curVal = ruleAnt[curAntInRule + 1];
-
-                                                allTrue &= curValV.Equals(curVal, StringComparison.OrdinalIgnoreCase);
-                                            }
-                                            //////////////////////////////////////////////////////////////////////
-                                        }  
-                                         //   allTrue = false; break; }
-                                    }
-                                    //все антценденты нашлись в очереди
-                                    if (allTrue == true)
-                                    {
-                                        // =>правило сработало
-                                        dgv_rule.Rows[curRule].DefaultCellStyle.BackColor = Color.Green;
-                                        int inc = curRule + 1;
-
-                                        string ruleStr = "Сработало правило Если ";
-                                            for (int i = 0; i<=4;i+=2)
-                                            {
-                                                if (ruleAnt[i]=="")
-                                                {break;}
-                                                string curAntStr = "(" + ruleAnt[i] + "-" + ruleAnt[i + 1] + ") и";
-                                                ruleStr += curAntStr;
-                                            }
-                                            ruleStr = ruleStr.Remove(ruleStr.Length - 2);
-                                            ruleStr += ",то";
-
-                                            string curConStr = "(" + ruleAnt[6] + "-" + ruleAnt[7] + ")";
-                                            MessageBox.Show(ruleStr+=curConStr);
-                                        lb_result.Items.Add("Сработало правило " + ruleStr);
-                                        ///////////////////////////////////////////
-                                        //dtRule.Rows[curRule].Delete();
-                                        ///////////////////////////////////////////
-                                        // ищем консеквент в таблице условий
-                                        string curConVar = ruleAnt[6].ToString();
-                                        string curConVal = ruleAnt[7].ToString();
-                                        DataRow[] foundRowsSV = dtVarCon.Select("ident_var = " + "'" + curConVar + "'");
-                                        if (foundRowsSV.Length != 0)//уже есть в таблице переменных условий
-                                        {
-                                            //помещаем новый факт в очередь если до этого не поместили
-                                            DataRow[] foundRowsExistInQueue = dtQueue.Select("q_fact_var = " + "'" + curConVar + "'");
-                                            if (foundRowsExistInQueue.Length == 0)
-                                            {
-                                                DataRow dRow = dtQueue.NewRow();
-                                                dRow["q_fact_var"] = curConVar;
-                                                dRow["q_fact_val"] = curConVal;
-                                                dtQueue.Rows.Add(dRow);
-                                            }
-                                            //правим значения в таблице переменных условий
-                                            foundRowsSV[0]["mark_init"] = true;
-                                            foundRowsSV[0]["val_var"] = curConVal;
-                                            //старый факт-в конец очереди
-                                //            dtQueue.Rows[0].Delete();
-                                            //DataRow dRowQ = dtQueue.NewRow();
-                                            //dRowQ["q_fact_var"] = q_fact_var;
-                                            //dRowQ["q_fact_val"] = q_fact_val;
-                                            //dtQueue.Rows.Add(dRowQ);
-
-                                        }
-                                        else//новый факт, не присутствует в антецендентах 
-                                        {
-                                            string res = "Получили, что (" + curConVar + " - " + curConVal + ")";
-                                            lb_result.Items.Add(res);
-                                            DialogResult result = MessageBox.Show(res+"\nПродолжить вычисления?", "Вопрос", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                                            if (result == DialogResult.No) //Если нажал нет
-                                            {
-                                                continueAns = continueAnswer.no;
-                                                break;
-                                            }
-                                            if (result == DialogResult.Yes) //Если нажал Да
-                                            {
-                                                continueAns = continueAnswer.yes;
-                                                //break;
-                                                continue;
-                                            }
-                                        }
-                                    }
-                                    else//не всё нашлось в очереди
-                                    {
-                                        //dtQueue.Rows[0].Delete();
-                                        //DataRow dRowQ = dtQueue.NewRow();
-                                        //dRowQ["q_fact_var"] = q_fact_var;
-                                        //dRowQ["q_fact_val"] = q_fact_val;
-                                        //dtQueue.Rows.Add(dRowQ);
-                                        break;
-                                    }
-                                }
+                                string ruleAntVal = deleteSpacesInString(dgv_rule[j, i].Value.ToString());
+                                dgv_rule[j, i].Value = ruleAntVal;
                             }
-                        }
-                        if (continueAns != continueAnswer.na) break;
-                    }
-                    if (continueAns == continueAnswer.no) break;
-                    //////////////////////////////////////////////////
-                    if (ent == entering.was)
-                    {
-                        dtQueue.Rows[0].Delete();
-                        //DataRow dRowQM = dtQueue.NewRow();
-                        //dRowQM["q_fact_var"] = q_fact_var;
-                        //dRowQM["q_fact_val"] = q_fact_val;
-                        //dtQueue.Rows.Add(dRowQM);
-                        //ent = entering.wasnot;
-                        continue;
-                    }
-                    ///////////////////////////////////////////////////
-                    if (continueAns == continueAnswer.yes)
-                    {
-                        continueAns = continueAnswer.na;
-                        continue;
-                    }
-                    else
-                        if (continueAns == continueAnswer.no)
-                        {
-                            continueAns = continueAnswer.na;
-                            break;
-                        }
-                        else//вхождение не было найдено
-                        {
-                            dtQueue.Rows[0].Delete();
-                        }
-                } while (dtQueue.Rows.Count != 0);
-                MessageBox.Show("Работа завершена");
-            #endregion
 
-                DataSet dSet = dbWorker.getDataSet();
-                dtRule = dSet.Tables[0];
-                dgv_rule.DataSource = dtRule;
-                for (int i = 0; i < dgv_rule.RowCount; i++)
-                {
-                    for (int j = 1; j < dgv_rule.ColumnCount; j++)
-                    {
-                        string ruleAntVal = deleteSpaces(dgv_rule[j, i].Value.ToString());
-                        dgv_rule[j, i].Value = ruleAntVal;
-                    }
+                        }
 
-                }
-                lb_result.Items.Clear();
 
+                        
+                        
+                        dicParametr.Add("dtRule", dtRule);
+                  #endregion
+
+                #region main work was here
+                workThread = new Thread(mainWork);
+                workThread.IsBackground = true;
+                workThread.Start(dicParametr);
+                #endregion
         }
 
-        private string deleteSpaces(string inStr)
+        private string deleteSpacesInString(string inStr)
         {
             return inStr.Trim();
         }
 
+        private void mainWork(object inputObject){
+            #region работа основная
+            Dictionary<String, DataTable> dicParametr = (Dictionary<String, DataTable>)inputObject;
+            DataTable dtQueue = dicParametr["dtQueue"];
+            DataTable dtVarCon = dicParametr["dtVarCon"];
+            DataTable dtRule = dicParametr["dtRule"];
+
+            delegateAddStringInLbResult delegateAddStringInLbResult = new ES_form.delegateAddStringInLbResult(addStringInLbResult);
+            delegateThisRefresh delegateThisRefresh = new ES_form.delegateThisRefresh(thisRefresh);
+
+            continueAnswer continueAns = continueAnswer.na;
+            bool firstStep = true;
+            string q_fact_var = "";
+            string q_fact_val = "";
+            string logString = "";
+
+
+            logString = "Старт работы системы";
+            lb_result.Invoke(delegateAddStringInLbResult, logString);
+
+            do
+            {
+                //берем факт из очереди
+                if (firstStep == false)
+                {
+                    if(showInfoWindows==true)
+                        MessageBox.Show("Закончили работать с фактом из очереди (" + q_fact_var + " - " + q_fact_val + ")");
+
+                    logString = "Закончили работать с фактом из очереди (" + q_fact_var + " - " + q_fact_val + ")";
+                    lb_result.Invoke(delegateAddStringInLbResult, logString);
+                }
+                firstStep = false;
+                ///////////////////////////////////
+                fillDgvByWhiteColor(dgv_rule);
+                //for (int i = 0; i < dgv_rule.Rows.Count; i++)
+                //    dgv_rule.Rows[i].DefaultCellStyle.BackColor = Color.White;
+                //////////////////////
+                q_fact_var = dtQueue.Rows[0]["q_fact_var"].ToString();
+                q_fact_val = dtQueue.Rows[0]["q_fact_val"].ToString();
+                if(showInfoWindows == true)
+                    MessageBox.Show("Берем новый факт из очереди (" + q_fact_var + " - " + q_fact_val + ")");
+
+                logString = "Работаем с фактом (" + q_fact_var + " - " + q_fact_val + ")";
+                lb_result.Invoke(delegateAddStringInLbResult, logString);
+
+                //addItemInLbResult("Работаем с фактом (" + q_fact_var + " - " + q_fact_val + ")");
+                entering ent = entering.wasnot;
+                //ищем вхождение в правило
+
+                DataTableReader dtRuleReader = dtRule.CreateDataReader();
+                int curRule = 0;
+                //for (int curRule = 0; curRule < dgv_rule.RowCount; curRule++)
+                while (dtRuleReader.Read())
+                {
+
+                    dgv_rule.Rows[curRule].DefaultCellStyle.BackColor = Color.Gray;
+                    Thread.Sleep(tickPerRule);
+
+                    string[] ruleAnt = new string[8];
+                    for (int curCell = 1; curCell < 9; curCell++)
+                    {
+                        ruleAnt[curCell - 1] = dtRuleReader.GetValue(curCell).ToString();
+                        //ruleAnt[curCell-1] = dgv_rule[curCell, curRule].Value.ToString();
+                    }
+                    //пробегаем по текущему правилу
+                    for (int curAnt = 0; curAnt <= 4; curAnt += 2)
+                    {
+                        //если есть вхождение в правило
+                        if (ruleAnt[curAnt].Equals(q_fact_var, StringComparison.OrdinalIgnoreCase))
+                        {
+                            //и вхождение с совпало с фактом
+                            if (ruleAnt[curAnt + 1].Equals(q_fact_val, StringComparison.OrdinalIgnoreCase))
+                            {
+                                ent = entering.was;
+                                bool allTrue = true;
+                                dgv_rule.Rows[curRule].DefaultCellStyle.BackColor = Color.LightYellow;
+
+                                Thread.Sleep(tickPerRule);
+                                //проверяем всё правило на факты
+                                for (int curAntInRule = 0; curAntInRule <= 4; curAntInRule += 2)
+                                {
+                                    if (ruleAnt[curAntInRule] == "") break;
+                                    DataRow[] foundRows = dtQueue.Select("q_fact_var = " + "'" + ruleAnt[curAntInRule] + "'");//ищем в очереди
+                                    if (foundRows.Length != 0)//нашли в очереди
+                                    {
+                                        string curValQ = foundRows[0]["q_fact_val"].ToString();
+                                        string curVal = ruleAnt[curAntInRule + 1];
+                                        allTrue &= curValQ.Equals(curVal, StringComparison.OrdinalIgnoreCase);
+                                    }
+                                    else
+                                    { //нет в очереди-проверим переменные
+                                        ///////////////////////////////////////////////////////////////////
+                                        DataRow[] foundRowsV = dtVarCon.Select("ident_var = " + "'" + ruleAnt[curAntInRule] + "'");
+                                        if (foundRowsV.Length == 0)
+                                        { allTrue = false; break; }
+                                        else
+                                        {
+                                            string curValV = foundRowsV[0]["val_var"].ToString();
+                                            string curVal = ruleAnt[curAntInRule + 1];
+
+                                            allTrue &= curValV.Equals(curVal, StringComparison.OrdinalIgnoreCase);
+                                        }
+                                        //////////////////////////////////////////////////////////////////////
+                                    }
+                                    //   allTrue = false; break; }
+                                }
+                                //все антценденты нашлись в очереди
+                                if (allTrue == true)
+                                {
+                                    // =>правило сработало
+                                    dgv_rule.Rows[curRule].DefaultCellStyle.BackColor = Color.Green;
+
+                                    Thread.Sleep(tickPerRule);
+                                    int inc = curRule + 1;
+
+                                    string ruleStr = "Сработало правило Если ";
+                                    for (int i = 0; i <= 4; i += 2)
+                                    {
+                                        if (ruleAnt[i] == "")
+                                        { break; }
+                                        string curAntStr = "(" + ruleAnt[i] + "-" + ruleAnt[i + 1] + ") и";
+                                        ruleStr += curAntStr;
+                                    }
+                                    ruleStr = ruleStr.Remove(ruleStr.Length - 2);
+                                    ruleStr += ",то";
+
+                                    string curConStr = "(" + ruleAnt[6] + "-" + ruleAnt[7] + ")";
+                                    ruleStr += curConStr;
+                                    if(showInfoWindows == true)
+                                        MessageBox.Show(ruleStr);
+
+                                    lb_result.Invoke(delegateAddStringInLbResult, ruleStr);
+
+                                  //  lb_result.Items.Add(ruleStr);
+                                    ///////////////////////////////////////////
+                                    //dtRule.Rows[curRule].Delete();
+                                    ///////////////////////////////////////////
+                                    // ищем консеквент в таблице условий
+                                    string curConVar = ruleAnt[6].ToString();
+                                    string curConVal = ruleAnt[7].ToString();
+                                    DataRow[] foundRowsSV = dtVarCon.Select("ident_var = " + "'" + curConVar + "'");
+                                    if (foundRowsSV.Length != 0)//уже есть в таблице переменных условий
+                                    {
+                                        //помещаем новый факт в очередь если до этого не поместили
+                                        DataRow[] foundRowsExistInQueue = dtQueue.Select("q_fact_var = " + "'" + curConVar + "'");
+                                        if (foundRowsExistInQueue.Length == 0)
+                                        {
+                                            DataRow dRow = dtQueue.NewRow();
+                                            dRow["q_fact_var"] = curConVar;
+                                            dRow["q_fact_val"] = curConVal;
+                                            dtQueue.Rows.Add(dRow);
+                                            this.BeginInvoke(delegateThisRefresh);
+                                        }
+                                        //правим значения в таблице переменных условий
+                                        foundRowsSV[0]["mark_init"] = true;
+                                        foundRowsSV[0]["val_var"] = curConVal;
+                                        //старый факт-в конец очереди
+                                        //            dtQueue.Rows[0].Delete();
+                                        //DataRow dRowQ = dtQueue.NewRow();
+                                        //dRowQ["q_fact_var"] = q_fact_var;
+                                        //dRowQ["q_fact_val"] = q_fact_val;
+                                        //dtQueue.Rows.Add(dRowQ);
+
+                                    }
+                                    else//новый факт, не присутствует в антецендентах 
+                                    {
+                                        string res = "Получили, что (" + curConVar + " - " + curConVal + ")";
+                                        lb_result.Items.Add(res);
+                                        DialogResult result = MessageBox.Show(res + "\nПродолжить вычисления?", "Вопрос", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+                                        if (result == DialogResult.No) //Если нажал нет
+                                        {
+                                            continueAns = continueAnswer.no;
+                                            break;
+                                        }
+                                        if (result == DialogResult.Yes) //Если нажал Да
+                                        {
+                                            continueAns = continueAnswer.yes;
+                                            //break;
+                                            continue;
+                                        }
+                                    }
+                                }
+                                else//не всё нашлось в очереди
+                                {
+                                    //dtQueue.Rows[0].Delete();
+                                    //DataRow dRowQ = dtQueue.NewRow();
+                                    //dRowQ["q_fact_var"] = q_fact_var;
+                                    //dRowQ["q_fact_val"] = q_fact_val;
+                                    //dtQueue.Rows.Add(dRowQ);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    curRule++;
+                    if (continueAns != continueAnswer.na) break;
+                }
+                if (continueAns == continueAnswer.no) break;
+                //////////////////////////////////////////////////
+                if (ent == entering.was)
+                {
+                    dtQueue.Rows[0].Delete();
+                    this.Invoke(delegateThisRefresh);
+                    //DataRow dRowQM = dtQueue.NewRow();
+                    //dRowQM["q_fact_var"] = q_fact_var;
+                    //dRowQM["q_fact_val"] = q_fact_val;
+                    //dtQueue.Rows.Add(dRowQM);
+                    //ent = entering.wasnot;
+                    continue;
+                }
+                ///////////////////////////////////////////////////
+                if (continueAns == continueAnswer.yes)
+                {
+                    continueAns = continueAnswer.na;
+                    continue;
+                }
+                else
+                    if (continueAns == continueAnswer.no)
+                    {
+                        continueAns = continueAnswer.na;
+                        break;
+                    }
+                    else//вхождение не было найдено
+                    {
+                        dtQueue.Rows[0].Delete();
+                    }
+            } while (dtQueue.Rows.Count != 0);
+            if(showInfoWindows == true)
+                MessageBox.Show("Работа завершена");
+
+            logString = "Завершение работы системы";
+            lb_result.Invoke(delegateAddStringInLbResult, logString);
+            #endregion
+        }
+
+        private void btn_stop_Click(object sender, EventArgs e)
+        {
+            btn_stop.Enabled = false;
+            btn_begin.Enabled = true;
+            if(workThread.IsAlive)
+                workThread.Abort();
+            lb_result.Items.Clear();
+            dgv_queue.DataSource = null;
+            dgv_varCon.DataSource = null;
+            fillDgvByWhiteColor(dgv_rule);
+        }
+
+        private void fillDgvByWhiteColor(DataGridView dgv)
+        {
+            for (int i = 0; i < dgv.Rows.Count; i++)
+                dgv.Rows[i].DefaultCellStyle.BackColor = Color.White;
+        }
+
+        private void ES_form_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            if (workThread.IsAlive)
+                workThread.Abort();
+        }
+
+        private void trackBarSpeedOfWatchRule_ValueChanged(object sender, EventArgs e)
+        {
+            tickPerRule = trackBarTickPerRule.Value * 1000 / 5;
+        }
+
+        private void btn_saveLogToFile_Click(object sender, EventArgs e)
+        {
+            StreamWriter streamWriter;  //Класс для записи в файл
+            FileInfo file = new FileInfo("Log.txt");
+            streamWriter = file.AppendText(); //Дописываем инфу в файл, если файла не существует он создастся
+            for (int i = 0; i < lb_result.Items.Count - 1; i++)
+                streamWriter.WriteLine(lb_result.Items[i].ToString()); //Записываем в файл текст из текстового поля
+            streamWriter.WriteLine("---------------------------------------------\n");
+            streamWriter.Close(); // Закрываем файл
+        }
+
+        private void checkBoxShowInfoWindows_CheckedChanged(object sender, EventArgs e)
+        {
+            if (checkBoxShowInfoWindows.Checked == false)
+                showInfoWindows = false;
+            else
+                showInfoWindows = true;
+        }
+
     }
+
 }

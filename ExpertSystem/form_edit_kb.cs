@@ -54,8 +54,5 @@ namespace ExpertSystem
             form.Show();
             this.Close();
         }
-
-
-
     }
 }

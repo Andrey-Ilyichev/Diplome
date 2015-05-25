@@ -40,7 +40,7 @@
             this.dgv_rule.Location = new System.Drawing.Point(13, 12);
             this.dgv_rule.Name = "dgv_rule";
             this.dgv_rule.Size = new System.Drawing.Size(861, 323);
-            this.dgv_rule.TabIndex = 0;
+            this.dgv_rule.TabIndex = 2;
             // 
             // btn_addRules
             // 
@@ -57,7 +57,7 @@
             this.button1.Location = new System.Drawing.Point(733, 341);
             this.button1.Name = "button1";
             this.button1.Size = new System.Drawing.Size(141, 23);
-            this.button1.TabIndex = 2;
+            this.button1.TabIndex = 0;
             this.button1.Text = "Перейти к работе с ЭС";
             this.button1.UseVisualStyleBackColor = true;
             this.button1.Click += new System.EventHandler(this.button1_Click);
